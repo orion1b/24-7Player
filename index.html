@@ -20,11 +20,12 @@
   #count{margin-left:auto;font-size:13px;font-weight:500;color:var(--mut);display:none}
   #count.on{display:inline}
   h1{font-size:20px;margin:4px 0;display:flex;align-items:center;gap:10px}
-  .live{font-size:11px;letter-spacing:.08em;background:var(--acc);color:#fff;border-radius:99px;padding:3px 9px;display:none}
-  .live.on{display:inline-block;animation:pulse 2s infinite}
+  .live{font-size:11px;font-weight:700;letter-spacing:.08em;line-height:1;background:var(--acc);color:#fff;border-radius:99px;padding:6px 10px 6px 11px;display:none;align-items:center;justify-content:center;gap:6px}
+  .live::before{content:"";width:6px;height:6px;border-radius:50%;background:#fff;flex:none}
+  .live.on{display:inline-flex;animation:pulse 2s infinite}
   @keyframes pulse{50%{opacity:.55}}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
-  input[type=text]{width:100%;background:#0e0f13;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:11px;font-size:15px}
+  input[type=text]{width:100%;background:#0e0f13;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:11px;font-size:16px}
   label{color:var(--mut);font-size:13px;display:flex;gap:8px;align-items:center;margin-top:10px}
   button{background:var(--acc);color:#fff;border:0;border-radius:10px;padding:12px 18px;font-size:16px;font-weight:600;cursor:pointer}
   button.sec{background:#262938}
@@ -33,7 +34,6 @@
   .row button{flex:1}
   #stage{position:relative;aspect-ratio:16/9;background:#000;border-radius:12px;overflow:hidden}
   #stage iframe,#stage #player{position:absolute;inset:0;width:100%;height:100%}
-  #cover{position:absolute;inset:0;pointer-events:none}
   .title{font-weight:600;font-size:17px;margin-top:12px}
   .sub{color:var(--mut);font-size:13px}
   .bar{height:5px;background:#262938;border-radius:9px;margin-top:10px;overflow:hidden}
@@ -41,13 +41,26 @@
   ol{margin:8px 0 0;padding-left:20px;color:var(--mut);font-size:14px}
   ol li{margin:3px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #status{color:var(--mut);font-size:13px;margin-top:8px;min-height:18px}
+  .vol{display:flex;align-items:center;gap:10px;margin-top:12px}
+  .vol button.ic{background:none;padding:0;font-size:18px;line-height:1;width:34px;height:34px}
+  input[type=range]{flex:1;min-width:0;accent-color:var(--acc);height:28px;margin:0}
+  .warn{background:#2a2230;border:1px solid var(--acc);border-radius:10px;padding:10px;margin-top:10px;font-size:13px}
+  .warn button{padding:6px 10px;font-size:13px;margin-left:6px}
+  #note{margin-top:8px;color:var(--fg)}
+  #chatlog{height:180px;overflow-y:auto;background:#0e0f13;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:14px;word-break:break-word}
+  #chatlog:empty::before{content:"No messages yet — say hi";color:var(--mut)}
+  .msg{margin:3px 0}
+  .chatrow{display:flex;gap:8px;margin-top:10px}
+  .chatrow #chatname{width:28%;min-width:0}
+  .chatrow #chatmsg{flex:1;min-width:0}
+  .chatrow button{padding:10px 14px;font-size:15px}
   .hide{display:none!important}
   #probeHost{position:fixed;left:-9999px;top:0;width:220px;height:220px}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1> 24/7 Radio <span class="live" id="live">⬤ LIVE</span><span id="count"></span></h1>
+  <h1>24/7 Radio <span class="live" id="live">LIVE</span><span id="count"></span></h1>
 
   <div class="card" id="setup">
     <input type="text" id="url" placeholder="YouTube playlist link or ID (PL...)">
@@ -62,20 +75,51 @@
     <div class="title" id="np">—</div>
     <div class="sub" id="meta"></div>
     <div class="bar"><div id="prog"></div></div>
+    <div class="vol">
+      <button class="ic" id="mute" aria-label="Mute">🔊</button>
+      <input type="range" id="vol" min="0" max="100" step="1" value="100" aria-label="Volume">
+    </div>
     <div class="row">
       <button id="tune">▶ Tune in</button>
+      <button class="sec" id="float">⧉ Float</button>
+    </div>
+    <div class="row">
+      <button class="sec" id="refresh">↻ Refresh list</button>
       <button class="sec" id="change">Change playlist</button>
     </div>
+    <div class="sub" id="ver" style="margin-top:10px"></div>
+    <div class="sub" id="rstatus"></div>
+    <div class="sub hide" id="note"></div>
+    <div class="warn hide" id="syncwarn">Other listeners are on a different version of the playlist, so you're not in sync. <button id="syncbtn">Refresh now</button></div>
+    <div class="sub hide" id="adnote" style="margin-top:10px">Ad playing — the station will jump back to the live spot when it ends.</div>
     <div class="sub" style="margin-top:12px">Up next</div>
     <ol id="next"></ol>
+  </div>
+
+  <div class="card hide" id="chatcard">
+    <div class="sub" style="margin-bottom:8px">Chat · messages disappear once nobody is tuned in</div>
+    <div id="chatlog"></div>
+    <form class="chatrow" id="chatform" autocomplete="off">
+      <input type="text" id="chatname" maxlength="20" placeholder="Name">
+      <input type="text" id="chatmsg" maxlength="200" placeholder="Say something…">
+      <button type="submit">Send</button>
+    </form>
   </div>
 </div>
 <div id="probeHost"><div id="probe"></div></div>
 <audio id="keep" loop playsinline></audio>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
 (() => {
+  // ================= CONFIG =================
+  // Listener counter (Supabase Realtime presence). Leave both empty to hide the counter.
+  // Project Settings → API → "Project URL" and the "anon public" key (safe to put in a web page).
+  const SUPABASE_URL = "";
+  const SUPABASE_KEY = "";
+  // ==========================================
+
   // Fixed station epoch: everyone computes the same "position in the loop" from this.
   const EPOCH = Date.UTC(2026, 0, 1) / 1000;
   const $ = id => document.getElementById(id);
@@ -86,6 +130,20 @@
   window.onYouTubeIframeAPIReady = () => ytReady();
 
   let tracks = [], total = 0, player = null, tuned = false, curIdx = -1;
+  let stationVer = "", curList = "", curShuffle = true;
+  // status text shows in the setup card and (once the station is open) in the radio card
+  const setStatus = t => { $("status").textContent = t; $("rstatus").textContent = t; };
+  let noteTimer = null;
+  function note(t) {
+    const el = $("note"); el.textContent = t; el.classList.remove("hide");
+    clearTimeout(noteTimer); noteTimer = setTimeout(() => el.classList.add("hide"), 6000);
+  }
+  // short fingerprint of the exact track list + lengths: two listeners with the same code are in sync
+  function fingerprint(arr) {
+    let h = 5381; const s = arr.map(t => t.id + ":" + t.d).join("|");
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return h.toString(16).padStart(8, "0").slice(0, 6);
+  }
 
   // ---------- config / hash ----------
   function parseList(v) {
@@ -132,7 +190,7 @@
   }
 
   async function buildStation(list, shuffle) {
-    const status = $("status");
+    const status = { set textContent(t) { setStatus(t); } };
     await ytP;
     const cache = loadCache(list);
     const probe = await new Promise(res => {
@@ -148,16 +206,17 @@
     });
     probe.mute();
 
-    if (!cache.ids || !cache.ids.length) {
-      status.textContent = "Reading playlist…";
+    // Always re-read the playlist so everyone ends up with the same, current list of songs.
+    // (Only the per-song lengths are cached — those never change.) Falls back to the saved list if offline.
+    status.textContent = "Reading playlist…";
+    let fresh = null;
+    try {
       probe.cuePlaylist({ listType: "playlist", list });
       await waitState(probe, [5], 15000);
-      let ids = null;
-      for (let i = 0; i < 20 && !(ids && ids.length); i++) { ids = probe.getPlaylist(); if (!ids) await sleep(300); }
-      if (!ids || !ids.length) { probe.destroy(); throw new Error("Couldn't read that playlist (is it public & embeddable?)."); }
-      cache.ids = ids; cache.meta = cache.meta || {};
-      saveCache(list, cache);
-    }
+      for (let i = 0; i < 20 && !(fresh && fresh.length); i++) { fresh = probe.getPlaylist(); if (!fresh) await sleep(300); }
+    } catch {}
+    if (fresh && fresh.length) { cache.ids = fresh; saveCache(list, cache); }
+    else if (!cache.ids || !cache.ids.length) { probe.destroy(); throw new Error("Couldn't read that playlist (is it public & embeddable?)."); }
     cache.meta = cache.meta || {};
 
     const todo = cache.ids.filter(id => !cache.meta[id]);
@@ -181,9 +240,10 @@
     if (!ids.length) throw new Error("No playable songs found in that playlist.");
     tracks = ids.map(id => ({ id, d: cache.meta[id].d, t: cache.meta[id].t }));
     total = tracks.reduce((a, t) => a + t.d, 0);
+    stationVer = fingerprint(tracks);
   }
 
-  // clock - track
+  // clock → track
   function where(offsetSec = 0) {
     let pos = (((Date.now() / 1000 + offsetSec - EPOCH) % total) + total) % total;
     for (let i = 0; i < tracks.length; i++) {
@@ -193,7 +253,7 @@
     return { i: 0, off: 0, left: tracks[0].d };
   }
 
-  // player
+  // ---------- player ----------
   async function makePlayer() {
     await ytP;
     return new Promise(res => {
@@ -201,30 +261,54 @@
         width: "100%", height: "100%",
         playerVars: { controls: 0, disablekb: 1, playsinline: 1, rel: 0, modestbranding: 1, iv_load_policy: 3 },
         events: {
-          onReady: () => res(p),
-          onError: () => { curIdx = -1; }   // resync on next tick
+          onReady: () => { try { p.setVolume(vol); } catch {} res(p); },
+          onStateChange: e => { if (e.data === 0 && tuned) setTimeout(() => tuned && syncPlay(false), 1500); },
+          // a failed video: wait a few seconds, then let the clock pick whatever should be playing
+          onError: () => setTimeout(() => { curIdx = -1; }, 3000)
         }
       });
     });
   }
 
+  // ---- sync engine ----
+  // Rules that stop the "reload loop" with ads and tab switches:
+  //  * never reload a video that is playing, buffering, or showing an ad — only seek if it drifted
+  //  * after any load, leave the player alone for LOAD_COOLDOWN ms (ads/buffering look like "not playing")
+  //  * a paused video (tab switch, OS) gets playVideo(), not a reload
+  const LOAD_COOLDOWN = 8000, DRIFT_LIMIT = 5;
+  let lastLoad = 0, lastNudge = 0, inAd = false;
+
+  function loadNow(s) {
+    curIdx = s.i; lastLoad = Date.now();
+    player.loadVideoById({ videoId: tracks[s.i].id, startSeconds: s.off });
+  }
+  function setAd(on) {
+    if (inAd === on) return;
+    inAd = on;
+    $("adnote").classList.toggle("hide", !on);
+  }
+
   function syncPlay(force) {
-    const s = where();
-    if (force || s.i !== curIdx) {
-      curIdx = s.i;
-      player.loadVideoById({ videoId: tracks[s.i].id, startSeconds: s.off });
+    if (!player || !tracks.length) return;
+    const s = where(), now = Date.now(), t = tracks[s.i];
+    if (force || s.i !== curIdx) { setAd(false); loadNow(s); return; }
+
+    const st = player.getPlayerState();
+    if (st === 3) return;                                   // buffering: wait
+    if (st === 1) {                                         // playing
+      const dur = player.getDuration() || 0;
+      if (dur && Math.abs(dur - t.d) > 3) { setAd(true); return; }   // length mismatch ⇒ ad: hands off
+      setAd(false);
+      if (Math.abs(player.getCurrentTime() - s.off) > DRIFT_LIMIT) player.seekTo(s.off, true);
       return;
     }
-    const st = player.getPlayerState();
-    if (st === 2 || st === 5 || st === -1) { // paused/cued/unstarted → resync
-      player.loadVideoById({ videoId: tracks[s.i].id, startSeconds: s.off });
-    } else if (st === 1) {
-      // If the playing duration doesn't match our track, an ad is probably running: don't seek it.
-      const dur = player.getDuration() || 0;
-      if (dur && Math.abs(dur - tracks[s.i].d) > 3) return;
-      const drift = Math.abs(player.getCurrentTime() - s.off);
-      if (drift > 4) player.seekTo(s.off, true);
+    if (now - lastLoad < LOAD_COOLDOWN) return;             // just loaded; give it time
+    if (st === 2) {                                         // paused (tab switch, OS) → resume, don't reload
+      if (now - lastNudge > 2500) { lastNudge = now; player.playVideo(); }
+      return;
     }
+    if (st === 0 && s.left < 3) return;                     // finished a hair early; next tick moves on
+    setAd(false); loadNow(s);                               // cued / unstarted / ended → start it
   }
 
   function render() {
@@ -248,9 +332,27 @@
       $("meta").textContent = `${fmt(s.off)} / ${fmt(tracks[s.i].d)} · track ${s.i + 1} of ${tracks.length} · loop ${fmt(total)}`;
       $("prog").style.width = (s.off / tracks[s.i].d * 100) + "%";
       if (tuned) syncPlay(false);
+      updateFloat(s);
     }, 1000);
   }
 
+  // ---------- keep-alive, lock screen, wake lock ----------
+  function silentWav() {
+    const sr = 8000, n = sr, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+    const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+    w(0, "RIFF"); v.setUint32(4, 36 + n, true); w(8, "WAVEfmt "); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true);
+    v.setUint32(28, sr, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+    w(36, "data"); v.setUint32(40, n, true);
+    new Uint8Array(buf, 44).fill(128);
+    return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  }
+  const keep = $("keep");
+  try { keep.src = silentWav(); keep.volume = 0.01; } catch {}
+
+  let wakeLock = null;
+  async function lockScreenOn() { try { if ("wakeLock" in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => wakeLock = null); } } catch {} }
+  function lockScreenOff() { try { wakeLock && wakeLock.release(); } catch {} wakeLock = null; }
 
   function updateMediaSession() {
     if (!("mediaSession" in navigator) || !tracks.length) return;
@@ -272,17 +374,57 @@
     set("play", () => { if (!tuned) $("tune").click(); });
     set("pause", () => { if (tuned) $("tune").click(); });
     set("stop", () => { if (tuned) $("tune").click(); });
-    // live radio: no seeking; "next" just resyncs to the live position
-    set("nexttrack", () => { if (tuned) syncPlay(true); });
+    set("nexttrack", () => { if (tuned) syncPlay(true); });   // live radio: "next" = jump to live
     set("seekbackward", null); set("seekforward", null); set("previoustrack", null);
+    // Chrome 134+: auto-open the floating window when you switch away from the tab while playing
+    set("enterpictureinpicture", () => { openFloat(); });
   }
   setupMediaKeys();
 
-  // Coming back from background / lock screen: resync to "now" and resume if we were tuned in.
+  // Returning to the tab / window: do NOT reload. Just re-render and let the soft sync fix drift.
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && tuned && player) { syncPlay(true); lockScreenOn(); }
+    if (document.visibilityState !== "visible") return;
+    if (tracks.length) { lastIdxRendered = -1; }
+    if (tuned) { lockScreenOn(); setTimeout(() => syncPlay(false), 600); }
   });
 
+  // ---------- floating mini-window (Document Picture-in-Picture, desktop Chrome/Edge) ----------
+  // The audio keeps playing in the main tab; this is a small always-on-top control window.
+  let fl = null;
+  const hasFloat = "documentPictureInPicture" in window;
+
+  async function openFloat() {
+    if (!hasFloat || !tracks.length || fl) return;
+    try {
+      const pip = await window.documentPictureInPicture.requestWindow({ width: 340, height: 175 });
+      const d = pip.document;
+      d.head.innerHTML = '<meta charset="utf-8"><style>' +
+        'body{margin:0;padding:14px;background:#171922;color:#eef0f6;font:14px/1.4 system-ui,sans-serif;display:flex;flex-direction:column;gap:8px;height:100vh}' +
+        '.t{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+        '.s{color:#8b90a3;font-size:12px}.bar{height:5px;background:#262938;border-radius:9px;overflow:hidden}' +
+        '.bar>div{height:100%;width:0;background:#ff4d6d}' +
+        'button{margin-top:auto;background:#ff4d6d;color:#fff;border:0;border-radius:10px;padding:10px;font-size:15px;font-weight:600;cursor:pointer}' +
+        '</style>';
+      d.body.innerHTML = '<div class="t" id="a"></div><div class="s" id="b"></div><div class="bar"><div id="c"></div></div><div class="s" id="e"></div><button id="f"></button>';
+      fl = { np: d.getElementById("a"), meta: d.getElementById("b"), prog: d.getElementById("c"), cnt: d.getElementById("e"), tune: d.getElementById("f") };
+      fl.tune.onclick = () => $("tune").click();
+      pip.addEventListener("pagehide", () => { fl = null; });
+      updateFloat(where());
+    } catch {}
+  }
+  function updateFloat(s) {
+    if (!fl) return;
+    const t = tracks[s.i];
+    fl.np.textContent = t.t;
+    fl.meta.textContent = fmt(s.off) + " / " + fmt(t.d);
+    fl.prog.style.width = (s.off / t.d * 100) + "%";
+    fl.cnt.textContent = $("count").textContent;
+    fl.tune.textContent = tuned ? "⏸ Tune out" : "▶ Tune in";
+  }
+  $("float").onclick = () => {
+    if (hasFloat) openFloat();
+    else note("Phone browsers don't allow floating windows. Use the lock-screen / notification player instead, or open the app on a desktop Chrome/Edge to float it.");
+  };
 
   // remember the station so the installed app opens straight into it
   function rememberStation(list, shuffle) { try { localStorage.setItem("radio_station", JSON.stringify({ list, shuffle })); } catch {} }
@@ -291,68 +433,168 @@
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
   }
 
-  // listener counter
-  
-  const DB_URL = "https://radio247-42480-default-rtdb.asia-southeast1.firebasedatabase.app/";
-  const WINDOW = 60000, BEAT = 20000;
+  // ---------- listener counter + chat (Supabase Realtime presence + broadcast — no tables or SQL) ----------
+  // Chat messages are never stored in a database: they only live in the open pages. Once nobody is
+  // tuned in (for 15 s) every page wipes its copy, so the chat disappears with the last listener.
   const cid = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-  let presList = "", presTimer = null;
-  const me = () => `${DB_URL}/radio/${presList}/${cid}.json`;
+  let sb = null, chan = null, chatEmptyTimer = null, chatLog = [], lastSend = 0;
+  const chatOn = () => !!(SUPABASE_URL && SUPABASE_KEY && window.supabase);
+  const myName = () => ($("chatname").value || "").trim().slice(0, 20) || ("guest-" + cid.slice(0, 4));
+  try { $("chatname").value = localStorage.getItem("radio_name") || ""; } catch {}
 
-  async function beat() {
-    if (!DB_URL || !presList || !tuned) return;
-    try { await fetch(me(), { method: "PUT", body: JSON.stringify({ t: Date.now() }) }); } catch {}
+  function trackPresence() { try { chan && chan.track({ tuned: !!tuned, ver: stationVer }); } catch {} }
+
+  function hue(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+  function renderChat() {
+    const el = $("chatlog");
+    const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+    el.textContent = "";
+    for (const m of chatLog) {
+      const d = document.createElement("div"); d.className = "msg";
+      const b = document.createElement("b"); b.textContent = m.name; b.style.color = "hsl(" + hue(m.name) + " 70% 72%)";
+      d.append(b, document.createTextNode(" " + m.text));
+      el.append(d);
+    }
+    if (stick) el.scrollTop = el.scrollHeight;
   }
-  function leave() {
-    if (!DB_URL || !presList) return;
-    try { fetch(me(), { method: "DELETE", keepalive: true }); } catch {}
+  function addMsgs(list) {
+    let changed = false;
+    for (const m of list) {
+      if (!m || typeof m.id !== "string" || typeof m.text !== "string" || typeof m.name !== "string") continue;
+      const id = m.id.slice(0, 40);
+      if (chatLog.some(x => x.id === id)) continue;
+      chatLog.push({ id, ts: Number(m.ts) || Date.now(), name: m.name.slice(0, 20) || "guest", text: m.text.slice(0, 200) });
+      changed = true;
+    }
+    if (!changed) return;
+    chatLog.sort((a, b) => a.ts - b.ts);
+    if (chatLog.length > 100) chatLog = chatLog.slice(-100);
+    renderChat();
   }
-  async function refreshCount() {
-    if (!DB_URL || !presList) return;
+  function clearChat() { chatLog = []; renderChat(); }
+
+  $("chatform").onsubmit = e => {
+    e.preventDefault();
+    const text = $("chatmsg").value.trim().slice(0, 200);
+    if (!text || !chan || Date.now() - lastSend < 1000) return;
+    lastSend = Date.now();
+    try { localStorage.setItem("radio_name", $("chatname").value.trim()); } catch {}
     try {
-      const r = await fetch(`${DB_URL}/radio/${presList}.json`);
-      const data = (await r.json()) || {};
-      const now = Date.now(); let n = 0;
-      for (const [k, v] of Object.entries(data)) {
-        const age = now - (v && v.t || 0);
-        if (age < WINDOW) n++;
-        else if (age > 5 * 60000) fetch(`${DB_URL}/radio/${presList}/${k}.json`, { method: "DELETE" }).catch(() => {}); // prune dead entries
-      }
-      $("count").textContent = "👥 " + n + " listening";
-      $("count").classList.add("on");
+      chan.send({ type: "broadcast", event: "chat", payload: { id: cid + Date.now().toString(36), ts: Date.now(), name: myName(), text } });
+      $("chatmsg").value = "";
     } catch {}
+  };
+
+  function showCount() {
+    if (!chan) return;
+    const st = chan.presenceState();
+    let n = 0, mismatch = false;
+    for (const k in st) {
+      const p = st[k][st[k].length - 1] || {};
+      if (p.tuned) n++;
+      if (k !== cid && p.ver && stationVer && p.ver !== stationVer) mismatch = true;
+    }
+    $("count").textContent = "👥 " + n + " listening";
+    $("count").classList.add("on");
+    $("syncwarn").classList.toggle("hide", !mismatch);
+    clearTimeout(chatEmptyTimer);
+    if (n === 0 && chatLog.length) chatEmptyTimer = setTimeout(clearChat, 15000);
+  }
+  function stopPresence() {
+    clearTimeout(chatEmptyTimer);
+    try { if (chan && sb) sb.removeChannel(chan); } catch {}
+    chan = null;
+    $("count").classList.remove("on");
+    $("syncwarn").classList.add("hide");
+    $("chatcard").classList.add("hide");
   }
   function startPresence(list) {
-    if (!DB_URL) return;
-    if (presList && presList !== list) leave();
-    presList = list;
-    clearInterval(presTimer);
-    const loop = () => { beat(); refreshCount(); };
-    loop(); presTimer = setInterval(loop, BEAT);
+    if (!chatOn()) return;
+    stopPresence();
+    try {
+      sb = sb || window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+      chan = sb.channel("radio:" + list, { config: { presence: { key: cid }, broadcast: { self: true } } });
+      chan.on("presence", { event: "sync" }, showCount)
+          .on("broadcast", { event: "chat" }, ({ payload }) => addMsgs([payload]))
+          // a newcomer says hello; anyone holding chat history sends it over (duplicates are ignored by id)
+          .on("broadcast", { event: "hello" }, ({ payload }) => {
+            if (!payload || payload.from === cid || !chatLog.length) return;
+            setTimeout(() => { try { chan && chan.send({ type: "broadcast", event: "history", payload: { to: payload.from, msgs: chatLog.slice(-50) } }); } catch {} }, Math.random() * 700);
+          })
+          .on("broadcast", { event: "history" }, ({ payload }) => {
+            if (payload && payload.to === cid && Array.isArray(payload.msgs)) addMsgs(payload.msgs.slice(0, 50));
+          })
+          .subscribe(status => {
+            if (status !== "SUBSCRIBED") return;
+            trackPresence();
+            try { chan.send({ type: "broadcast", event: "hello", payload: { from: cid } }); } catch {}
+          });
+      $("chatcard").classList.remove("hide");
+    } catch { chan = null; }
   }
-  addEventListener("pagehide", leave);
+  addEventListener("pagehide", stopPresence);
 
-  // UI works
+  // ---------- volume ----------
+  // (iPhone/iPad ignore web volume for YouTube — use the hardware buttons there.)
+  let vol = 100;
+  try { const v = parseInt(localStorage.getItem("radio_vol"), 10); if (v >= 0 && v <= 100) vol = v; } catch {}
+  let lastVol = vol || 100;
+  $("vol").value = vol;
+  function applyVol() {
+    try { player && player.setVolume(vol); } catch {}
+    $("mute").textContent = vol === 0 ? "🔇" : vol < 40 ? "🔈" : "🔊";
+    try { localStorage.setItem("radio_vol", String(vol)); } catch {}
+  }
+  $("vol").oninput = e => { vol = +e.target.value; if (vol) lastVol = vol; applyVol(); };
+  $("mute").onclick = () => { if (vol) { lastVol = vol; vol = 0; } else vol = lastVol || 100; $("vol").value = vol; applyVol(); };
+  applyVol();
+
+  // ---------- refresh playlist ----------
+  // Re-reads the playlist from YouTube and rebuilds the station. If the song list changed, the position
+  // is recomputed from the clock, so you land on the same song as everyone else on the new list.
+  let refreshing = false;
+  function showVer() { $("ver").textContent = tracks.length ? "Station " + stationVer + " · " + tracks.length + " songs · loop " + fmt(total) : ""; }
+  async function refreshStation() {
+    if (refreshing || !curList) return;
+    refreshing = true; $("refresh").disabled = true; $("syncbtn").disabled = true;
+    try {
+      const old = stationVer;
+      await buildStation(curList, curShuffle);
+      if (stationVer !== old) {
+        lastIdxRendered = -1; curIdx = -1; render();
+        if (tuned) syncPlay(true);
+        note("Playlist updated ✓");
+      } else note("Already up to date ✓");
+      showVer(); trackPresence(); updateMediaSession();
+    } catch (e) { note("Couldn't refresh: " + e.message); }
+    setStatus(""); refreshing = false; $("refresh").disabled = false; $("syncbtn").disabled = false;
+  }
+  $("refresh").onclick = refreshStation;
+  $("syncbtn").onclick = refreshStation;
+
+  // ---------- UI ----------
   async function start(list, shuffle) {
     $("build").disabled = true;
     $("status").textContent = "Starting…";
     try {
       await buildStation(list, shuffle);
     } catch (e) {
-      $("status").textContent = e.message;
+      setStatus(e.message);
       $("build").disabled = false;
       return;
     }
+    setStatus("");
+    curList = list; curShuffle = shuffle;
     writeHash(list, shuffle);
     rememberStation(list, shuffle);
     startPresence(list);
     $("setup").classList.add("hide");
     $("radio").classList.remove("hide");
     if (!player) player = await makePlayer();
-    tuned = false; curIdx = -1; lastIdxRendered = -1;
+    tuned = false; curIdx = -1; lastIdxRendered = -1; setAd(false);
     $("tune").textContent = "▶ Tune in";
     $("live").classList.remove("on");
-    render(); startTicker();
+    render(); showVer(); startTicker();
     $("build").disabled = false;
   }
 
@@ -365,28 +607,30 @@
   $("tune").onclick = () => {
     if (!tuned) {
       tuned = true; curIdx = -1;
-      player.unMute(); player.setVolume(100);
+      player.unMute(); player.setVolume(vol);
       syncPlay(true);
       try { keep.play().catch(() => {}); } catch {}
       lockScreenOn();
       $("tune").textContent = "⏸ Tune out";
       $("live").classList.add("on");
-      beat(); setTimeout(refreshCount, 600);
     } else {
-      tuned = false;
+      tuned = false; setAd(false);
       player.pauseVideo();
       try { keep.pause(); } catch {}
       lockScreenOff();
-      leave(); setTimeout(refreshCount, 600);
       $("tune").textContent = "▶ Tune in";
       $("live").classList.remove("on");
     }
+    trackPresence();
     updateMediaSession();
+    if (tracks.length) updateFloat(where());
   };
 
   $("change").onclick = () => {
-    tuned = false; clearInterval(tick); leave();
+    tuned = false; clearInterval(tick); stopPresence(); clearChat(); setAd(false);
     if (player) player.pauseVideo();
+    try { keep.pause(); } catch {}
+    lockScreenOff();
     $("radio").classList.add("hide");
     $("setup").classList.remove("hide");
     $("live").classList.remove("on");
