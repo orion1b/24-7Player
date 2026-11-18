@@ -17,6 +17,8 @@
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;justify-content:center;padding:16px;padding-top:max(16px,env(safe-area-inset-top));padding-bottom:max(16px,env(safe-area-inset-bottom))}
   .wrap{width:100%;max-width:640px;display:flex;flex-direction:column;gap:14px}
+  #count{margin-left:auto;font-size:13px;font-weight:500;color:var(--mut);display:none}
+  #count.on{display:inline}
   h1{font-size:20px;margin:4px 0;display:flex;align-items:center;gap:10px}
   .live{font-size:11px;letter-spacing:.08em;background:var(--acc);color:#fff;border-radius:99px;padding:3px 9px;display:none}
   .live.on{display:inline-block;animation:pulse 2s infinite}
@@ -45,7 +47,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>24/7 Radio <span class="live" id="live">⬤LIVE</span></h1>
+  <h1> 24/7 Radio <span class="live" id="live">⬤ LIVE</span><span id="count"></span></h1>
 
   <div class="card" id="setup">
     <input type="text" id="url" placeholder="YouTube playlist link or ID (PL...)">
@@ -181,7 +183,7 @@
     total = tracks.reduce((a, t) => a + t.d, 0);
   }
 
-  // ---------- clock → track ----------
+  // clock - track
   function where(offsetSec = 0) {
     let pos = (((Date.now() / 1000 + offsetSec - EPOCH) % total) + total) % total;
     for (let i = 0; i < tracks.length; i++) {
@@ -191,7 +193,7 @@
     return { i: 0, off: 0, left: tracks[0].d };
   }
 
-  // ---------- player ----------
+  // player
   async function makePlayer() {
     await ytP;
     return new Promise(res => {
@@ -217,6 +219,9 @@
     if (st === 2 || st === 5 || st === -1) { // paused/cued/unstarted → resync
       player.loadVideoById({ videoId: tracks[s.i].id, startSeconds: s.off });
     } else if (st === 1) {
+      // If the playing duration doesn't match our track, an ad is probably running: don't seek it.
+      const dur = player.getDuration() || 0;
+      if (dur && Math.abs(dur - tracks[s.i].d) > 3) return;
       const drift = Math.abs(player.getCurrentTime() - s.off);
       if (drift > 4) player.seekTo(s.off, true);
     }
@@ -246,8 +251,7 @@
     }, 1000);
   }
 
-  // ---background/lock-screen addon
-
+  // bg support attempt
   function silentWav() {
     const sr = 8000, n = sr, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
     const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
@@ -295,7 +299,7 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && tuned && player) { syncPlay(true); lockScreenOn(); }
   });
-  // If the OS pauses the video while backgrounded, start it back as soon as we can.
+  // If the OS pauses the video while backgrounded, nudge it back as soon as we can.
   setInterval(() => { if (tuned && player && document.visibilityState === "hidden") syncPlay(false); }, 3000);
 
   // remember the station so the installed app opens straight into it
@@ -305,7 +309,48 @@
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
   }
 
-  // ---- UI works
+  // listener counter
+  
+  const DB_URL = "https://radio247-42480-default-rtdb.asia-southeast1.firebasedatabase.app/";
+  const WINDOW = 60000, BEAT = 20000;
+  const cid = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  let presList = "", presTimer = null;
+  const me = () => `${DB_URL}/radio/${presList}/${cid}.json`;
+
+  async function beat() {
+    if (!DB_URL || !presList || !tuned) return;
+    try { await fetch(me(), { method: "PUT", body: JSON.stringify({ t: Date.now() }) }); } catch {}
+  }
+  function leave() {
+    if (!DB_URL || !presList) return;
+    try { fetch(me(), { method: "DELETE", keepalive: true }); } catch {}
+  }
+  async function refreshCount() {
+    if (!DB_URL || !presList) return;
+    try {
+      const r = await fetch(`${DB_URL}/radio/${presList}.json`);
+      const data = (await r.json()) || {};
+      const now = Date.now(); let n = 0;
+      for (const [k, v] of Object.entries(data)) {
+        const age = now - (v && v.t || 0);
+        if (age < WINDOW) n++;
+        else if (age > 5 * 60000) fetch(`${DB_URL}/radio/${presList}/${k}.json`, { method: "DELETE" }).catch(() => {}); // prune dead entries
+      }
+      $("count").textContent = "👥 " + n + " listening";
+      $("count").classList.add("on");
+    } catch {}
+  }
+  function startPresence(list) {
+    if (!DB_URL) return;
+    if (presList && presList !== list) leave();
+    presList = list;
+    clearInterval(presTimer);
+    const loop = () => { beat(); refreshCount(); };
+    loop(); presTimer = setInterval(loop, BEAT);
+  }
+  addEventListener("pagehide", leave);
+
+  // UI works
   async function start(list, shuffle) {
     $("build").disabled = true;
     $("status").textContent = "Starting…";
@@ -318,6 +363,7 @@
     }
     writeHash(list, shuffle);
     rememberStation(list, shuffle);
+    startPresence(list);
     $("setup").classList.add("hide");
     $("radio").classList.remove("hide");
     if (!player) player = await makePlayer();
@@ -343,11 +389,13 @@
       lockScreenOn();
       $("tune").textContent = "⏸ Tune out";
       $("live").classList.add("on");
+      beat(); setTimeout(refreshCount, 600);
     } else {
       tuned = false;
       player.pauseVideo();
       try { keep.pause(); } catch {}
       lockScreenOff();
+      leave(); setTimeout(refreshCount, 600);
       $("tune").textContent = "▶ Tune in";
       $("live").classList.remove("on");
     }
@@ -355,7 +403,7 @@
   };
 
   $("change").onclick = () => {
-    tuned = false; clearInterval(tick);
+    tuned = false; clearInterval(tick); leave();
     if (player) player.pauseVideo();
     $("radio").classList.add("hide");
     $("setup").classList.remove("hide");
