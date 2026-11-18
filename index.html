@@ -2,12 +2,20 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>24/7 Radio</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0e0f13">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="24/7 Radio">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <style>
   :root{--bg:#0e0f13;--card:#171922;--fg:#eef0f6;--mut:#8b90a3;--acc:#ff4d6d;--line:#262938}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;justify-content:center;padding:16px}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;justify-content:center;padding:16px;padding-top:max(16px,env(safe-area-inset-top));padding-bottom:max(16px,env(safe-area-inset-bottom))}
   .wrap{width:100%;max-width:640px;display:flex;flex-direction:column;gap:14px}
   h1{font-size:20px;margin:4px 0;display:flex;align-items:center;gap:10px}
   .live{font-size:11px;letter-spacing:.08em;background:var(--acc);color:#fff;border-radius:99px;padding:3px 9px;display:none}
@@ -37,14 +45,14 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>24/7 Radio<span class="live" id="live">●LIVE</span></h1>
+  <h1>24/7 Radio <span class="live" id="live">⬤LIVE</span></h1>
 
   <div class="card" id="setup">
     <input type="text" id="url" placeholder="YouTube playlist link or ID (PL...)">
     <label><input type="checkbox" id="shuffle" checked> Shuffle order (same shuffle for every listener)</label>
     <div class="row"><button id="build">Start station</button></div>
     <div id="status"></div>
-    <div class="sub" style="margin-top:8px">The playlist gotta be public or unlisted with embedding allowed. Auto-generated mixes wont work. Playlist ID's are shared</div>
+    <div class="sub" style="margin-top:8px">The playlist gotta be public/unlisted with embedding allowed(no auto-gen mixes). Once the station starts, all users can access the station with the same playlist link</div>
   </div>
 
   <div class="card hide" id="radio">
@@ -61,6 +69,7 @@
   </div>
 </div>
 <div id="probeHost"><div id="probe"></div></div>
+<audio id="keep" loop playsinline></audio>
 
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
@@ -91,7 +100,7 @@
     history.replaceState(null, "", "#list=" + list + "&shuffle=" + (shuffle ? 1 : 0));
   }
 
-  // ---------- seeded shuffle ----------
+  // seeded shuffle
   function seeded(str) {
     let h = 1779033703 ^ str.length;
     for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = h << 13 | h >>> 19; }
@@ -106,7 +115,7 @@
     return a;
   }
 
-  // ---------- probing durations ----------
+  // probing time
   const cacheKey = l => "radio_v1_" + l;
   const loadCache = l => { try { return JSON.parse(localStorage.getItem(cacheKey(l))) || {}; } catch { return {}; } };
   const saveCache = (l, c) => { try { localStorage.setItem(cacheKey(l), JSON.stringify(c)); } catch {} };
@@ -230,14 +239,73 @@
     clearInterval(tick);
     tick = setInterval(() => {
       const s = where();
-      if (s.i !== lastIdxRendered) { lastIdxRendered = s.i; render(); }
+      if (s.i !== lastIdxRendered) { lastIdxRendered = s.i; render(); updateMediaSession(); }
       $("meta").textContent = `${fmt(s.off)} / ${fmt(tracks[s.i].d)} · track ${s.i + 1} of ${tracks.length} · loop ${fmt(total)}`;
       $("prog").style.width = (s.off / tracks[s.i].d * 100) + "%";
       if (tuned) syncPlay(false);
     }, 1000);
   }
 
-  // --------UI works-------
+  // ---background/lock-screen addon
+
+  function silentWav() {
+    const sr = 8000, n = sr, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+    const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+    w(0, "RIFF"); v.setUint32(4, 36 + n, true); w(8, "WAVEfmt "); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true);
+    v.setUint32(28, sr, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+    w(36, "data"); v.setUint32(40, n, true);
+    new Uint8Array(buf, 44).fill(128);
+    return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  }
+  const keep = $("keep");
+  try { keep.src = silentWav(); keep.volume = 0.01; } catch {}
+
+  let wakeLock = null;
+  async function lockScreenOn() { try { if ("wakeLock" in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => wakeLock = null); } } catch {} }
+  function lockScreenOff() { try { wakeLock && wakeLock.release(); } catch {} wakeLock = null; }
+
+  function updateMediaSession() {
+    if (!("mediaSession" in navigator) || !tracks.length) return;
+    const t = tracks[where().i];
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: t.t, artist: "24/7 Radio · LIVE", album: "Live station",
+        artwork: [
+          { src: "icons/icon-192.png", sizes: "192x192", type: "image/png" },
+          { src: "icons/icon-512.png", sizes: "512x512", type: "image/png" }
+        ]
+      });
+      navigator.mediaSession.playbackState = tuned ? "playing" : "paused";
+    } catch {}
+  }
+  function setupMediaKeys() {
+    if (!("mediaSession" in navigator)) return;
+    const set = (a, f) => { try { navigator.mediaSession.setActionHandler(a, f); } catch {} };
+    set("play", () => { if (!tuned) $("tune").click(); });
+    set("pause", () => { if (tuned) $("tune").click(); });
+    set("stop", () => { if (tuned) $("tune").click(); });
+    // live radio: no seeking; "next" just resyncs to the live position
+    set("nexttrack", () => { if (tuned) syncPlay(true); });
+    set("seekbackward", null); set("seekforward", null); set("previoustrack", null);
+  }
+  setupMediaKeys();
+
+  // Coming back from background / lock screen: resync to "now" and resume if we were tuned in.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && tuned && player) { syncPlay(true); lockScreenOn(); }
+  });
+  // If the OS pauses the video while backgrounded, start it back as soon as we can.
+  setInterval(() => { if (tuned && player && document.visibilityState === "hidden") syncPlay(false); }, 3000);
+
+  // remember the station so the installed app opens straight into it
+  function rememberStation(list, shuffle) { try { localStorage.setItem("radio_station", JSON.stringify({ list, shuffle })); } catch {} }
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  }
+
+  // ---- UI works
   async function start(list, shuffle) {
     $("build").disabled = true;
     $("status").textContent = "Starting…";
@@ -249,6 +317,7 @@
       return;
     }
     writeHash(list, shuffle);
+    rememberStation(list, shuffle);
     $("setup").classList.add("hide");
     $("radio").classList.remove("hide");
     if (!player) player = await makePlayer();
@@ -261,7 +330,7 @@
 
   $("build").onclick = () => {
     const list = parseList($("url").value);
-    if (!list) { $("status").textContent = "Paste a valid YT playlist link or ID."; return; }
+    if (!list) { $("status").textContent = "Paste a valid YouTube playlist link or ID."; return; }
     start(list, $("shuffle").checked);
   };
 
@@ -270,14 +339,19 @@
       tuned = true; curIdx = -1;
       player.unMute(); player.setVolume(100);
       syncPlay(true);
+      try { keep.play().catch(() => {}); } catch {}
+      lockScreenOn();
       $("tune").textContent = "⏸ Tune out";
       $("live").classList.add("on");
     } else {
       tuned = false;
       player.pauseVideo();
+      try { keep.pause(); } catch {}
+      lockScreenOff();
       $("tune").textContent = "▶ Tune in";
       $("live").classList.remove("on");
     }
+    updateMediaSession();
   };
 
   $("change").onclick = () => {
@@ -295,7 +369,15 @@
     $("shuffle").checked = h.shuffle;
     start(h.list, h.shuffle);
   } else {
-    try { const last = localStorage.getItem("radio_last"); if (last) $("url").value = last; } catch {}
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem("radio_station")); } catch {}
+    if (saved && saved.list) {          // installed app launches without a hash → reopen last station
+      $("url").value = saved.list;
+      $("shuffle").checked = saved.shuffle !== false;
+      start(saved.list, saved.shuffle !== false);
+    } else {
+      try { const last = localStorage.getItem("radio_last"); if (last) $("url").value = last; } catch {}
+    }
   }
   $("url").addEventListener("change", () => { try { localStorage.setItem("radio_last", $("url").value); } catch {} });
 })();
