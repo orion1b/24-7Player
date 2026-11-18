@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>24/7 Radio</title>
+<style>
+  :root{--bg:#0e0f13;--card:#171922;--fg:#eef0f6;--mut:#8b90a3;--acc:#ff4d6d;--line:#262938}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;justify-content:center;padding:16px}
+  .wrap{width:100%;max-width:640px;display:flex;flex-direction:column;gap:14px}
+  h1{font-size:20px;margin:4px 0;display:flex;align-items:center;gap:10px}
+  .live{font-size:11px;letter-spacing:.08em;background:var(--acc);color:#fff;border-radius:99px;padding:3px 9px;display:none}
+  .live.on{display:inline-block;animation:pulse 2s infinite}
+  @keyframes pulse{50%{opacity:.55}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+  input[type=text]{width:100%;background:#0e0f13;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:11px;font-size:15px}
+  label{color:var(--mut);font-size:13px;display:flex;gap:8px;align-items:center;margin-top:10px}
+  button{background:var(--acc);color:#fff;border:0;border-radius:10px;padding:12px 18px;font-size:16px;font-weight:600;cursor:pointer}
+  button.sec{background:#262938}
+  button:disabled{opacity:.5}
+  .row{display:flex;gap:10px;margin-top:12px}
+  .row button{flex:1}
+  #stage{position:relative;aspect-ratio:16/9;background:#000;border-radius:12px;overflow:hidden}
+  #stage iframe,#stage #player{position:absolute;inset:0;width:100%;height:100%}
+  #cover{position:absolute;inset:0;pointer-events:none}
+  .title{font-weight:600;font-size:17px;margin-top:12px}
+  .sub{color:var(--mut);font-size:13px}
+  .bar{height:5px;background:#262938;border-radius:9px;margin-top:10px;overflow:hidden}
+  .bar>div{height:100%;width:0;background:var(--acc)}
+  ol{margin:8px 0 0;padding-left:20px;color:var(--mut);font-size:14px}
+  ol li{margin:3px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #status{color:var(--mut);font-size:13px;margin-top:8px;min-height:18px}
+  .hide{display:none!important}
+  #probeHost{position:fixed;left:-9999px;top:0;width:220px;height:220px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>24/7 Radio<span class="live" id="live">●LIVE</span></h1>
+
+  <div class="card" id="setup">
+    <input type="text" id="url" placeholder="YouTube playlist link or ID (PL...)">
+    <label><input type="checkbox" id="shuffle" checked> Shuffle order (same shuffle for every listener)</label>
+    <div class="row"><button id="build">Start station</button></div>
+    <div id="status"></div>
+    <div class="sub" style="margin-top:8px">The playlist gotta be public or unlisted with embedding allowed. Auto-generated mixes wont work. Playlist ID's are shared</div>
+  </div>
+
+  <div class="card hide" id="radio">
+    <div id="stage"><div id="player"></div></div>
+    <div class="title" id="np">—</div>
+    <div class="sub" id="meta"></div>
+    <div class="bar"><div id="prog"></div></div>
+    <div class="row">
+      <button id="tune">▶ Tune in</button>
+      <button class="sec" id="change">Change playlist</button>
+    </div>
+    <div class="sub" style="margin-top:12px">Up next</div>
+    <ol id="next"></ol>
+  </div>
+</div>
+<div id="probeHost"><div id="probe"></div></div>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+(() => {
+  // Fixed station epoch: everyone computes the same "position in the loop" from this.
+  const EPOCH = Date.UTC(2026, 0, 1) / 1000;
+  const $ = id => document.getElementById(id);
+  const fmt = s => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  let ytReady; const ytP = new Promise(r => ytReady = r);
+  window.onYouTubeIframeAPIReady = () => ytReady();
+
+  let tracks = [], total = 0, player = null, tuned = false, curIdx = -1;
+
+  // ---------- config / hash ----------
+  function parseList(v) {
+    v = (v || "").trim();
+    const m = v.match(/[?&]list=([\w-]+)/);
+    if (m) return m[1];
+    return /^[\w-]{10,}$/.test(v) ? v : "";
+  }
+  function readHash() {
+    const p = new URLSearchParams(location.hash.slice(1));
+    return { list: p.get("list") || "", shuffle: p.get("shuffle") !== "0" };
+  }
+  function writeHash(list, shuffle) {
+    history.replaceState(null, "", "#list=" + list + "&shuffle=" + (shuffle ? 1 : 0));
+  }
+
+  // ---------- seeded shuffle ----------
+  function seeded(str) {
+    let h = 1779033703 ^ str.length;
+    for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = h << 13 | h >>> 19; }
+    return () => {
+      h = Math.imul(h ^ h >>> 16, 2246822507); h = Math.imul(h ^ h >>> 13, 3266489909);
+      return ((h ^= h >>> 16) >>> 0) / 4294967296;
+    };
+  }
+  function shuffled(arr, seed) {
+    const a = arr.slice(), r = seeded(seed);
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+
+  // ---------- probing durations ----------
+  const cacheKey = l => "radio_v1_" + l;
+  const loadCache = l => { try { return JSON.parse(localStorage.getItem(cacheKey(l))) || {}; } catch { return {}; } };
+  const saveCache = (l, c) => { try { localStorage.setItem(cacheKey(l), JSON.stringify(c)); } catch {} };
+
+  function waitState(p, wanted, timeout) {
+    return new Promise(res => {
+      let done = false;
+      const fin = v => { if (done) return; done = true; clearTimeout(t); p.__cb = null; res(v); };
+      const t = setTimeout(() => fin("timeout"), timeout);
+      p.__cb = e => { if (e.type === "state" && wanted.includes(e.data)) fin("ok"); if (e.type === "error") fin("error"); };
+    });
+  }
+
+  async function buildStation(list, shuffle) {
+    const status = $("status");
+    await ytP;
+    const cache = loadCache(list);
+    const probe = await new Promise(res => {
+      const p = new YT.Player("probe", {
+        height: "220", width: "220",
+        playerVars: { playsinline: 1 },
+        events: {
+          onReady: () => res(p),
+          onStateChange: e => p.__cb && p.__cb({ type: "state", data: e.data }),
+          onError: e => p.__cb && p.__cb({ type: "error", data: e.data })
+        }
+      });
+    });
+    probe.mute();
+
+    if (!cache.ids || !cache.ids.length) {
+      status.textContent = "Reading playlist…";
+      probe.cuePlaylist({ listType: "playlist", list });
+      await waitState(probe, [5], 15000);
+      let ids = null;
+      for (let i = 0; i < 20 && !(ids && ids.length); i++) { ids = probe.getPlaylist(); if (!ids) await sleep(300); }
+      if (!ids || !ids.length) { probe.destroy(); throw new Error("Couldn't read that playlist (is it public & embeddable?)."); }
+      cache.ids = ids; cache.meta = cache.meta || {};
+      saveCache(list, cache);
+    }
+    cache.meta = cache.meta || {};
+
+    const todo = cache.ids.filter(id => !cache.meta[id]);
+    for (let i = 0; i < todo.length; i++) {
+      const id = todo[i];
+      status.textContent = `Measuring songs… ${i + 1}/${todo.length} (only needed once on this device)`;
+      probe.cueVideoById(id);
+      const r = await waitState(probe, [5], 8000);
+      let d = 0, title = "";
+      if (r === "ok") {
+        for (let k = 0; k < 15 && !d; k++) { d = probe.getDuration() || 0; if (!d) await sleep(200); }
+        try { title = probe.getVideoData().title || ""; } catch {}
+      }
+      cache.meta[id] = { d: Math.floor(d), t: title || id }; // d=0 → unplayable, skipped
+      saveCache(list, cache);
+    }
+    probe.destroy();
+
+    let ids = cache.ids.filter(id => cache.meta[id] && cache.meta[id].d > 5);
+    if (shuffle) ids = shuffled(ids, list);
+    if (!ids.length) throw new Error("No playable songs found in that playlist.");
+    tracks = ids.map(id => ({ id, d: cache.meta[id].d, t: cache.meta[id].t }));
+    total = tracks.reduce((a, t) => a + t.d, 0);
+  }
+
+  // ---------- clock → track ----------
+  function where(offsetSec = 0) {
+    let pos = (((Date.now() / 1000 + offsetSec - EPOCH) % total) + total) % total;
+    for (let i = 0; i < tracks.length; i++) {
+      if (pos < tracks[i].d) return { i, off: pos, left: tracks[i].d - pos };
+      pos -= tracks[i].d;
+    }
+    return { i: 0, off: 0, left: tracks[0].d };
+  }
+
+  // ---------- player ----------
+  async function makePlayer() {
+    await ytP;
+    return new Promise(res => {
+      const p = new YT.Player("player", {
+        width: "100%", height: "100%",
+        playerVars: { controls: 0, disablekb: 1, playsinline: 1, rel: 0, modestbranding: 1, iv_load_policy: 3 },
+        events: {
+          onReady: () => res(p),
+          onError: () => { curIdx = -1; }   // resync on next tick
+        }
+      });
+    });
+  }
+
+  function syncPlay(force) {
+    const s = where();
+    if (force || s.i !== curIdx) {
+      curIdx = s.i;
+      player.loadVideoById({ videoId: tracks[s.i].id, startSeconds: s.off });
+      return;
+    }
+    const st = player.getPlayerState();
+    if (st === 2 || st === 5 || st === -1) { // paused/cued/unstarted → resync
+      player.loadVideoById({ videoId: tracks[s.i].id, startSeconds: s.off });
+    } else if (st === 1) {
+      const drift = Math.abs(player.getCurrentTime() - s.off);
+      if (drift > 4) player.seekTo(s.off, true);
+    }
+  }
+
+  function render() {
+    const s = where();
+    const t = tracks[s.i];
+    $("np").textContent = t.t;
+    $("meta").textContent = `${fmt(s.off)} / ${fmt(t.d)} · track ${s.i + 1} of ${tracks.length} · loop ${fmt(total)}`;
+    $("prog").style.width = (s.off / t.d * 100) + "%";
+    const nx = [];
+    for (let k = 1; k <= 5; k++) nx.push(tracks[(s.i + k) % tracks.length].t);
+    $("next").innerHTML = nx.map(x => "<li></li>").join("");
+    [...$("next").children].forEach((li, i) => li.textContent = nx[i]);
+  }
+
+  let tick = null, lastIdxRendered = -1;
+  function startTicker() {
+    clearInterval(tick);
+    tick = setInterval(() => {
+      const s = where();
+      if (s.i !== lastIdxRendered) { lastIdxRendered = s.i; render(); }
+      $("meta").textContent = `${fmt(s.off)} / ${fmt(tracks[s.i].d)} · track ${s.i + 1} of ${tracks.length} · loop ${fmt(total)}`;
+      $("prog").style.width = (s.off / tracks[s.i].d * 100) + "%";
+      if (tuned) syncPlay(false);
+    }, 1000);
+  }
+
+  // --------UI works-------
+  async function start(list, shuffle) {
+    $("build").disabled = true;
+    $("status").textContent = "Starting…";
+    try {
+      await buildStation(list, shuffle);
+    } catch (e) {
+      $("status").textContent = e.message;
+      $("build").disabled = false;
+      return;
+    }
+    writeHash(list, shuffle);
+    $("setup").classList.add("hide");
+    $("radio").classList.remove("hide");
+    if (!player) player = await makePlayer();
+    tuned = false; curIdx = -1; lastIdxRendered = -1;
+    $("tune").textContent = "▶ Tune in";
+    $("live").classList.remove("on");
+    render(); startTicker();
+    $("build").disabled = false;
+  }
+
+  $("build").onclick = () => {
+    const list = parseList($("url").value);
+    if (!list) { $("status").textContent = "Paste a valid YT playlist link or ID."; return; }
+    start(list, $("shuffle").checked);
+  };
+
+  $("tune").onclick = () => {
+    if (!tuned) {
+      tuned = true; curIdx = -1;
+      player.unMute(); player.setVolume(100);
+      syncPlay(true);
+      $("tune").textContent = "⏸ Tune out";
+      $("live").classList.add("on");
+    } else {
+      tuned = false;
+      player.pauseVideo();
+      $("tune").textContent = "▶ Tune in";
+      $("live").classList.remove("on");
+    }
+  };
+
+  $("change").onclick = () => {
+    tuned = false; clearInterval(tick);
+    if (player) player.pauseVideo();
+    $("radio").classList.add("hide");
+    $("setup").classList.remove("hide");
+    $("live").classList.remove("on");
+  };
+
+  // auto-load station from the url hash
+  const h = readHash();
+  if (h.list) {
+    $("url").value = h.list;
+    $("shuffle").checked = h.shuffle;
+    start(h.list, h.shuffle);
+  } else {
+    try { const last = localStorage.getItem("radio_last"); if (last) $("url").value = last; } catch {}
+  }
+  $("url").addEventListener("change", () => { try { localStorage.setItem("radio_last", $("url").value); } catch {} });
+})();
+</script>
+</body>
+</html>
